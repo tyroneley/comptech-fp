@@ -19,7 +19,6 @@ def parse_query(tokens):
     while i < len(tokens):
         token = tokens[i]
 
-        # Handle SELECT statements
         if token in ["show", "list", "display", "select"]:
             i += 1
             while i < len(tokens) and tokens[i] not in ["from", "where", "order", "in"]:
@@ -27,26 +26,21 @@ def parse_query(tokens):
                     parsed_query["select_columns"].append(tokens[i])
                 i += 1
 
-        # Handle FROM statements
         elif token == "from":
             i += 1
             parsed_query["table"] = tokens[i]
             i += 1
 
-        # Handle WHERE conditions with "in"
         elif token == "in" and i + 2 < len(tokens) and tokens[i + 2] == "department":
-            # Replace 'in' with '=' for department conditions
             parsed_query["where_conditions"] = f"department = '{tokens[i + 1].lower()}'"
             i += 3
 
-        # Handle ORDER BY statements
         elif token == "order" and i + 1 < len(tokens) and tokens[i + 1] == "by":
             i += 2
             while i < len(tokens) and tokens[i] not in ["ascending", "descending"]:
                 parsed_query["order_by_columns"].append(tokens[i])
                 i += 1
 
-            # Ascending or Descending
             if i < len(tokens):
                 if tokens[i] == "ascending":
                     parsed_query["asc_desc"] = "asc"
@@ -84,38 +78,78 @@ def translate_to_sql():
     sql_query = generate_sql(parsed_query)
     output_label.config(text=f"Generated SQL Query:\n{sql_query}", fg="green")
 
-# GUI Implementation
 root = tk.Tk()
 root.title("Natural Language to SQL Translator")
-root.geometry("900x500")
-root.config(bg="#f4f4f9")  # Light background color
+root.geometry("800x500")
+root.config(bg="#eef2f3")
 
-# Title Label with improved font
-tk.Label(root, text="Natural Language to SQL Translator", font=("Segoe UI", 22, "bold"), fg="#004e64", bg="#f4f4f9").pack(pady=20)
+tk.Label(
+    root, 
+    text="Natural Language to SQL Translator", 
+    font=("Helvetica", 22, "bold"), 
+    fg="#1a535c", 
+    bg="#eef2f3"
+).pack(pady=20)
 
-# Frame for Input Section
-input_frame = tk.Frame(root, bg="#f4f4f9")
-input_frame.pack(pady=20)
+input_frame = tk.Frame(root, bg="#eef2f3")
+input_frame.pack(pady=10)
 
-# Frame for Input Section
-input_frame = tk.Frame(root, bg="#f4f4f9")
-input_frame.pack(pady=20)
+tk.Label(
+    input_frame, 
+    text="Enter your query:", 
+    font=("Helvetica", 14), 
+    fg="#1a535c", 
+    bg="#eef2f3"
+).grid(row=0, column=0, sticky="w", padx=10)
 
-# Input Label
-tk.Label(input_frame, text="Enter your query:", font=("Segoe UI", 14), fg="#004e64", bg="#f4f4f9").pack(anchor="w", padx=10)
+query_input = tk.Entry(
+    input_frame, 
+    width=60, 
+    font=("Helvetica", 14), 
+    relief="solid", 
+    highlightbackground="#62b3b2", 
+    highlightthickness=1
+)
+query_input.grid(row=1, column=0, pady=10, padx=10)
 
-# Input Entry (without padx, added padding in the frame)
-query_input = tk.Entry(input_frame, width=80, font=("Segoe UI", 12), borderwidth=2, relief="solid")
-query_input.pack(pady=10)
+def on_enter(e):
+    translate_button.config(bg="#505050")
 
-# Translate Button with rounded corners
-translate_button = tk.Button(root, text="Translate to SQL", font=("Segoe UI", 14, "bold"), bg="#62b3b2", fg="white", command=translate_to_sql,
-                             relief="solid", padx=20, pady=10, bd=0)
-translate_button.pack(pady=20)
+def on_leave(e):
+    translate_button.config(bg="#333333") 
 
-# Output Label
-output_label = tk.Label(root, text="", font=("Segoe UI", 14), wraplength=850, justify="left", fg="green", bg="#f4f4f9")
-output_label.pack(pady=10, padx=20)
+translate_button = tk.Button(
+    root, 
+    text="Translate to SQL", 
+    font=("Helvetica", 14, "bold"), 
+    bg="#333333", 
+    fg="#292626", 
+    activebackground="#1a1a1a", 
+    activeforeground="white", 
+    command=translate_to_sql, 
+    bd=0, 
+    padx=20, 
+    pady=8
+)
+translate_button.bind("<Enter>", on_enter) 
+translate_button.bind("<Leave>", on_leave)
+translate_button.pack(pady=10)
 
-# Run the GUI
+output_frame = tk.Frame(root, bg="#eef2f3", padx=10, pady=10)
+output_frame.pack(fill="both", expand=True)
+
+output_label = tk.Label(
+    output_frame, 
+    text="Generated SQL Query will appear here", 
+    font=("Helvetica", 14), 
+    wraplength=750, 
+    justify="left", 
+    fg="#1a535c", 
+    bg="#eef2f3", 
+    relief="solid", 
+    padx=10, 
+    pady=10
+)
+output_label.pack(fill="both", expand=True)
+
 root.mainloop()
