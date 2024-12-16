@@ -1,162 +1,204 @@
 import tkinter as tk
-from pyparsing import Word, alphas, alphanums, oneOf, delimitedList, Optional, Group, CaselessKeyword
+from tkinter import ttk, messagebox
+import re
 
-DATABASE_SCHEMA = {
-    "employees": ["id", "name", "age", "department", "salary"],
-    "departments": ["id", "name", "location"]
+tables = {
+    "users": ["id", "name", "followers", "email", "created_at", "follower_count"],
+    "posts": ["id", "user_id", "content", "created_at"],
+    "comments": ["id", "post_id", "user_id", "content", "created_at"]
 }
 
-SELECT = oneOf("show list display select", caseless=True)
-FROM = CaselessKeyword("from")
-WHERE = CaselessKeyword("where")
-HAVING = CaselessKeyword("having")
-GROUP_BY = CaselessKeyword("group by")
-ORDER_BY = CaselessKeyword("order by")
-ASC_DESC = oneOf("asc desc", caseless=True)
-AND_OR = oneOf("and or", caseless=True)
+synonyms = {
+    "followers": ["followers", "follower count", "number of followers", "followers count"],
+    "name": ["name", "username", "user name", "full name"],
+    "created_at": ["created_at", "created on", "joined", "date joined"],
+    "content": ["content", "post content", "message", "text"],
+    "user_id": ["user_id", "author id", "poster id"],
+    "id": ["id", "post id", "user id", "comment id"],
+    "email": ["email", "email address"]
+}
 
-COLUMN = Word(alphas + "_")
-TABLE = Word(alphas + "_")
-NATURAL_OPERATOR = oneOf("more_than less_than at_least at_most", caseless=True)
-SQL_OPERATOR = oneOf("= > < >= <= !=", caseless=True)
-OPERATOR = NATURAL_OPERATOR | SQL_OPERATOR
-VALUE = Word(alphanums + "_'")
+def populate_schema(tree):
+    for table, columns in tables.items():
+        parent = tree.insert("", "end", text=table, values=(f"({len(columns)} columns)",))
+        for column in columns:
+            tree.insert(parent, "end", text=column)
 
-columns = delimitedList(COLUMN)("columns")
-all_columns = CaselessKeyword("all").setParseAction(lambda: "*")
-select_clause = SELECT + (all_columns | delimitedList(COLUMN))("select_columns")
-from_clause = FROM + TABLE("table")
-
-condition = Group(COLUMN + OPERATOR + VALUE)("condition")
-conditions = condition + Optional(AND_OR + condition)("conditions")
-where_clause = Optional(WHERE + conditions("where_conditions"))
-
-group_by_clause = Optional(GROUP_BY + delimitedList(COLUMN)("group_by_columns"))
-having_clause = Optional(HAVING + conditions("having_conditions"))
-order_by_clause = Optional(ORDER_BY + delimitedList(COLUMN)("order_by_columns") + Optional(ASC_DESC)("asc_desc"))
-
-query = select_clause("select_clause") + from_clause("from_clause") + where_clause + group_by_clause + having_clause + order_by_clause
-
-def map_operator(operator):
-    operator_mapping = {
-        "more_than": ">",
-        "less_than": "<",
-        "at_least": ">=",
-        "at_most": "<=",
-        "=": "=",
-        ">": ">",
-        "<": "<",
-        ">=": ">=",
-        "<=": "<=",
-        "!=": "!="
+def normalize_column(col_name):
+    synonyms = {
+        "name": ["name", "username", "user name", "the name"],
+        "email": ["email", "email address", "the email"],
+        "content": ["content", "post content", "message", "text", "the content"],
+        "created_at": ["created_at", "created on", "joined", "date joined"],
+        "followers": ["followers", "follower count", "number of followers", "the followers"],
+        "user_id": ["user_id", "author id", "poster id"],
+        "id": ["id", "post id", "user id", "comment id"],
     }
-    return operator_mapping.get(operator.lower())
-
-def validate_schema(parsed_query):
-    table = parsed_query.table
-    if table not in DATABASE_SCHEMA:
-        return f"Error: Table '{table}' not found in the database schema."
-
-    select_columns = parsed_query.select_columns
-    if select_columns == "*":
-        return None
-    if isinstance(select_columns, list):
-        for column in select_columns:
-            if column not in DATABASE_SCHEMA[table]:
-                return f"Error: Column '{column}' not found in the table '{table}'."
-
+    for standard_name, variations in synonyms.items():
+        if col_name.lower() in variations:
+            return standard_name
     return None
 
-def generate_sql(parsed_query):
-    table = parsed_query.table
-    select_columns = parsed_query.select_columns
+def preprocess_where_clause(where_clause):
+    unnecessary_words = ["the", "is", "are"]
+    for word in unnecessary_words:
+        where_clause = re.sub(rf"\b{word}\b", "", where_clause, flags=re.IGNORECASE)
+    return where_clause.strip()
 
-    if select_columns == "*":
-        select_columns = "*"
-    else:
-        select_columns = ", ".join(select_columns) if isinstance(select_columns, list) else select_columns
+def extract_select_clause(query, table_in_context):
+    aggregates = {
+        "total number": "COUNT",
+        "average": "AVG",
+        "sum": "SUM",
+        "maximum": "MAX",
+        "minimum": "MIN"
+    }
+    match = re.search(r"(show me|give me|list|select) (.*?) (from|where|of|for|on|who|that)", query, re.IGNORECASE)
+    if match:
+        columns = match.group(2).strip()
+        for phrase, agg_func in aggregates.items():
+            if phrase in columns.lower():
+                return [f"{agg_func}(*)"]
+        if columns.lower() in ["all", "everything", "*", f"all {table_in_context}"]:
+            return ["*"]
+        columns = re.split(r",| and ", columns)
+        normalized_columns = [normalize_column(col.strip()) for col in columns]
+        if None in normalized_columns:
+            return None
+        return normalized_columns
+    if table_in_context:
+        return ["*"]
+    return None
 
-    where_conditions = ""
-    if "where_conditions" in parsed_query:
-        where_conditions = " WHERE " + " ".join(
-            [
-                f"{cond[0]} {map_operator(cond[1])} {cond[2]}"
-                if isinstance(cond, list)
-                else cond
-                for cond in parsed_query.where_conditions.asList()
+def extract_from_clause(query):
+    normalized_query = query
+    for standard_name, variations in synonyms.items():
+        for variation in variations:
+            normalized_query = re.sub(rf"\b{variation}\b", standard_name, normalized_query, flags=re.IGNORECASE)
+    for table in tables.keys():
+        if re.search(rf"\b{table}\b", normalized_query, re.IGNORECASE):
+            return table
+    mentioned_columns = []
+    for table, columns in tables.items():
+        for column in columns:
+            if re.search(rf"\b{column}\b", normalized_query, re.IGNORECASE):
+                mentioned_columns.append((table, column))
+    if mentioned_columns:
+        tables_mentioned = [table for table, column in mentioned_columns]
+        if len(set(tables_mentioned)) == 1:
+            return tables_mentioned[0]
+    return None
+
+def extract_where_clause(query):
+    match = re.search(r"(where|who|having) (.+)", query, re.IGNORECASE)
+    if match:
+        return match.group(2).strip()
+    fallback_match = re.search(r"users who (.+)", query, re.IGNORECASE)
+    if fallback_match:
+        return fallback_match.group(1).strip()
+    return None
+
+def extract_conditions(where_clause):
+    cleaned_clause = preprocess_where_clause(where_clause)
+    condition_parts = re.split(r"\b(and|or)\b", cleaned_clause, flags=re.IGNORECASE)
+    conditions = []
+    logical_operators = []
+    for part in condition_parts:
+        part = part.strip()
+        if part.lower() in ["and", "or"]:
+            logical_operators.append(part.upper())
+        else:
+            condition_patterns = [
+                (r"([\w\s]+)\s*(greater than|more than|over|after)\s+(\d+)", 
+                 lambda col, op_text, val: f"{normalize_column(col.strip())} > {val}"),
+                (r"([\w\s]+)\s*(less than|under|below)\s+(\d+)", 
+                 lambda col, op_text, val: f"{normalize_column(col.strip())} < {val}"),
+                (r"([\w\s]+)\s*(equals|is)\s+['\"]?(.+?)['\"]?", 
+                 lambda col, is_equals, val: f"{normalize_column(col.strip())} = '{val}'" if val.isalpha() else f"{normalize_column(col.strip())} = {val}"),
+                (r"([\w\s]+)\s*(contains|like)\s+['\"](.+?)['\"]", 
+                 lambda col, op_text, substring: f"{normalize_column(col.strip())} LIKE '%{substring}%'"),
+                (r"([\w\s]+)\s*between\s+(\d+)\s+and\s+(\d+)", 
+                 lambda col, val1, val2: f"{normalize_column(col.strip())} BETWEEN {val1} AND {val2}")
             ]
-        )
+            for pattern, repl in condition_patterns:
+                matches = re.findall(pattern, part)
+                for match in matches:
+                    col = match[0].strip()
+                    col = normalize_column(col)
+                    if col:
+                        conditions.append(repl(col, *match[1:]))
+    combined_conditions = []
+    for i, condition in enumerate(conditions):
+        combined_conditions.append(condition)
+        if i < len(logical_operators):
+            combined_conditions.append(logical_operators[i])
+    return " ".join(combined_conditions)
 
-    group_by_columns = ""
-    if "group_by_columns" in parsed_query:
-        group_by_columns = " GROUP BY " + ", ".join(parsed_query.group_by_columns.asList())
+def parse_query(query):
+    query = query.lower()
+    from_clause = extract_from_clause(query)
+    select_clause = extract_select_clause(query, from_clause)
+    where_clause = extract_where_clause(query)
+    if not select_clause or None in select_clause:
+        return "Error: Could not determine what to SELECT. Please check your query."
+    if not from_clause:
+        return "Error: Could not determine which table to SELECT FROM. Please check your query."
+    sql = f"SELECT {', '.join(select_clause)} FROM {from_clause}"
+    if where_clause:
+        conditions = extract_conditions(where_clause)
+        if conditions:
+            sql += f" WHERE {conditions}"
+    return sql
 
-    having_conditions = ""
-    if "having_conditions" in parsed_query:
-        having_conditions = " HAVING " + " ".join(
-            [
-                f"{cond[0]} {map_operator(cond[1])} {cond[2]}"
-                if isinstance(cond, list)
-                else cond
-                for cond in parsed_query.having_conditions.asList()
-            ]
-        )
+def on_generate_sql():
+    user_input = query_input.get()
+    if not user_input:
+        messagebox.showwarning("Input Error", "Please enter a query.")
+        return
+    sql_query = parse_query(user_input)
+    output_text.config(state=tk.NORMAL)
+    output_text.delete(1.0, tk.END)
+    output_text.insert(tk.END, sql_query)
+    output_text.config(state=tk.DISABLED)
 
-    order_by_columns = ""
-    if "order_by_columns" in parsed_query:
-        order_by_columns = " ORDER BY " + ", ".join(parsed_query.order_by_columns.asList())
-        if "asc_desc" in parsed_query:
-            order_by_columns += " " + parsed_query.asc_desc
+window = tk.Tk()
+window.title("Natural Language to SQL Translator")
+window.geometry("800x600")
 
-    return f"SELECT {select_columns} FROM {table}{where_conditions}{group_by_columns}{having_conditions}{order_by_columns};"
+main_frame = ttk.Frame(window, padding=10)
+main_frame.pack(fill="both", expand=True)
 
-# GUI
-def on_query_submit():
-    nl_query = query_entry.get()
-    if nl_query.lower() == "exit":
-        root.quit()
-    else:
-        try:
-            parsed_query = query.parseString(nl_query, parseAll=False)
-            schema_error = validate_schema(parsed_query)
+schema_frame = ttk.LabelFrame(main_frame, text="Database Schema", padding=10)
+schema_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-            if schema_error:
-                result_text.set(f"Error: {schema_error}")
-            else:
-                sql_query = generate_sql(parsed_query)
-                result_text.set(f"Generated SQL Query: {sql_query}")
+schema_tree = ttk.Treeview(schema_frame, columns=("Columns",), show="tree")
+schema_tree.heading("#0", text="Table / Column")
+schema_tree.heading("Columns", text="Details")
+schema_tree.column("#0", width=200, anchor="w")
+schema_tree.column("Columns", width=150, anchor="center")
+populate_schema(schema_tree)
+schema_tree.pack(fill="both", expand=True)
 
-        except Exception as e:
-            result_text.set(f"Error: Unable to parse the query.\nDetails: {str(e)}")
+query_frame = ttk.LabelFrame(main_frame, text="Query Input", padding=10)
+query_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
 
-root = tk.Tk()
-root.title("Natural Language to SQL Translator")
+query_label = ttk.Label(query_frame, text="Enter your Natural Language Query:")
+query_label.pack(anchor="w", pady=5)
 
-root.geometry("600x400")
+query_input = ttk.Entry(query_frame, width=80)
+query_input.pack(fill="x", pady=5)
 
-title_label = tk.Label(root, text="Natural Language to SQL Translator", font=("Helvetica", 16))
-title_label.pack(pady=(25, 10))
+generate_button = ttk.Button(query_frame, text="Generate SQL", command=on_generate_sql)
+generate_button.pack(pady=10)
 
-schema_label = tk.Label(root, text="Database Schema:\n\n" +
-                    f"Employees Table: {DATABASE_SCHEMA['employees']}\n" +
-                    f"Departments Table: {DATABASE_SCHEMA['departments']}\n",
-                    justify=tk.LEFT, font=("Arial", 12))
-schema_label.pack(pady=10)
+output_frame = ttk.LabelFrame(main_frame, text="Generated SQL Query", padding=10)
+output_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
 
-query_label = tk.Label(root, text="Enter your natural language query:")
-query_label.pack(pady=5)
+output_text = tk.Text(output_frame, height=10, wrap="word", state=tk.DISABLED)
+output_text.pack(fill="both", expand=True)
 
-explanation_text = tk.Label(root, text="More than: more_than, Less than: less_than, at least: at_least, at most: at_most", font=("Helvetica", 10), justify="left")
-explanation_text.pack(pady=10)
+main_frame.rowconfigure(0, weight=1)
+main_frame.rowconfigure(2, weight=2)
+main_frame.columnconfigure(0, weight=1)
 
-query_entry = tk.Entry(root, width=50)
-query_entry.pack(pady=5)
-
-submit_button = tk.Button(root, text="Submit", command=on_query_submit)
-submit_button.pack(pady=5)
-
-result_text = tk.StringVar()
-result_label = tk.Label(root, textvariable=result_text, font=("Helvetica", 12), justify="left")
-result_label.pack(pady=10)
-
-root.mainloop()
+window.mainloop()
