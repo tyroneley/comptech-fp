@@ -1,9 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import re
+import sqlite3
+
+# Connect to the SQLite database (or create it if it doesn't exist)
+db_connection = sqlite3.connect("data.db")
+db_cursor = db_connection.cursor()
 
 tables = {
-    "users": ["id", "name", "followers", "email", "created_at", "follower_count"],
+    "users": ["id", "name", "followers", "email", "created_at"],
     "posts": ["id", "user_id", "content", "created_at"],
     "comments": ["id", "post_id", "user_id", "content", "created_at"]
 }
@@ -19,6 +24,86 @@ synonyms = {
 }
 
 query_history = []
+# Populate all tables with sample data
+def initialize_database():
+    # Create 'users' table
+    db_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            followers INTEGER,
+            email TEXT,
+            created_at TEXT
+        )
+    """)
+    # Insert sample data for 'users'
+    user_data = [
+        ('Alice Smith', 200, 'alice.smith@example.com', '2024-02-01'),
+        ('Bob Johnson', 350, 'bob.johnson@example.com', '2024-03-15'),
+        ('Charlie Brown', 120, 'charlie.brown@example.com', '2024-04-10'),
+        ('Diana Prince', 500, 'diana.prince@example.com', '2024-05-25'),
+        ('Eve Adams', 90, 'eve.adams@example.com', '2024-06-18')
+    ]
+    db_cursor.executemany("""
+        INSERT INTO users (name, followers, email, created_at)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS(SELECT 1 FROM users WHERE email = ?)
+    """, [(name, followers, email, created_at, email) for name, followers, email, created_at in user_data])
+
+    # Create 'posts' table
+    db_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            content TEXT,
+            created_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+    # Insert sample data for 'posts'
+    post_data = [
+        (1, 'Hello, this is Alice\'s first post!', '2024-02-02'),
+        (2, 'Bob here, loving this platform!', '2024-03-16'),
+        (3, 'Charlie posting some cool updates!', '2024-04-11'),
+        (4, 'Diana sharing her thoughts.', '2024-05-26'),
+        (5, 'Eve posting random stuff.', '2024-06-19')
+    ]
+    db_cursor.executemany("""
+        INSERT INTO posts (user_id, content, created_at)
+        SELECT ?, ?, ?
+        WHERE NOT EXISTS(SELECT 1 FROM posts WHERE content = ?)
+    """, [(user_id, content, created_at, content) for user_id, content, created_at in post_data])
+
+    # Create 'comments' table
+    db_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER,
+            user_id INTEGER,
+            content TEXT,
+            created_at TEXT,
+            FOREIGN KEY (post_id) REFERENCES posts (id),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+    # Insert sample data for 'comments'
+    comment_data = [
+        (1, 2, 'Great post, Bob!', '2024-03-17'),
+        (2, 3, 'Thanks for the update, Charlie!', '2024-04-12'),
+        (3, 4, 'Interesting thoughts, Diana!', '2024-05-27'),
+        (4, 5, 'Haha, nice one, Eve!', '2024-06-20'),
+        (5, 1, 'Welcome, Alice!', '2024-02-03')
+    ]
+    db_cursor.executemany("""
+        INSERT INTO comments (post_id, user_id, content, created_at)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS(SELECT 1 FROM comments WHERE content = ?)
+    """, [(post_id, user_id, content, created_at, content) for post_id, user_id, content, created_at in comment_data])
+
+    # Commit all changes
+    db_connection.commit()
+
+initialize_database()
 
 def populate_schema(tree):
     for table, columns in tables.items():
@@ -205,7 +290,8 @@ def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses
             sql += f" WHERE {conditions}"
     return sql
 
-def on_generate_sql(): # triggers the parsing and SQL generation when user submits their input
+
+def on_generate_sql():
     user_input = query_input.get()
     if not user_input:
         messagebox.showwarning("Input Error", "Please enter a query.")
@@ -216,10 +302,14 @@ def on_generate_sql(): # triggers the parsing and SQL generation when user submi
     output_text.insert(tk.END, sql_query)
     output_text.config(state=tk.DISABLED)
 
-     # Store query in history
+    # Store query in history
     if user_input not in query_history:
         query_history.append(user_input)
         update_query_history()
+
+    # Display the results in the results table
+    if not sql_query.startswith("Error"):
+        display_query_results(sql_query)
 
 def update_query_history():
     query_history_combobox['values'] = query_history
@@ -230,6 +320,33 @@ def on_query_history_select(event):
     selected_query = query_history_combobox.get()
     query_input.delete(0, tk.END)
     query_input.insert(0, selected_query)
+
+
+def display_query_results(sql_query):
+    try:
+        # Execute the SQL query
+        db_cursor.execute(sql_query)
+        rows = db_cursor.fetchall()
+        columns = [description[0] for description in db_cursor.description]
+
+        # Clear existing rows and columns in the results table (if any)
+        for item in results_table.get_children():
+            results_table.delete(item)
+        results_table["columns"] = columns
+        results_table["show"] = "headings"
+
+        # Add columns to the results table
+        for col in columns:
+            results_table.heading(col, text=col)
+            results_table.column(col, width=150, anchor="center")
+
+        # Insert rows into the results table
+        for row in rows:
+            results_table.insert("", "end", values=row)
+
+    except sqlite3.Error as e:
+        messagebox.showerror("Database Error", f"An error occurred: {e}")
+
 
 window = tk.Tk()
 window.title("Natural Language to SQL Translator")
@@ -277,6 +394,14 @@ output_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
 output_text = tk.Text(output_frame, height=10, wrap="word", state=tk.DISABLED)
 output_text.pack(fill="both", expand=True)
 ToolTip(output_text, "The SQL query generated from your input will appear here.")
+
+results_frame = ttk.LabelFrame(main_frame, text="Query Results", padding=10)
+results_frame.grid(row=3, column=0, sticky="nsew", padx=10, pady=10)
+
+results_table = ttk.Treeview(results_frame)
+results_table.pack(fill="both", expand=True)
+
+main_frame.rowconfigure(3, weight=2)
 
 main_frame.rowconfigure(0, weight=1)
 main_frame.rowconfigure(2, weight=2)
