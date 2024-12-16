@@ -18,11 +18,40 @@ synonyms = {
     "email": ["email", "email address"]
 }
 
+query_history = []
+
 def populate_schema(tree):
     for table, columns in tables.items():
         parent = tree.insert("", "end", text=table, values=(f"({len(columns)} columns)",))
         for column in columns:
             tree.insert(parent, "end", text=column)
+
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("tahoma", "10", "normal"))
+        label.pack(ipadx=1)
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
 
 def normalize_column(col_name): # handles the recognition of column names by normalizing variations or synonyms
     synonyms = {
@@ -150,6 +179,22 @@ def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses
             sql += f" WHERE {conditions}"
     return sql
 
+def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses to generate the final SQL query
+    query = query.lower()
+    from_clause = extract_from_clause(query)
+    select_clause = extract_select_clause(query, from_clause)
+    where_clause = extract_where_clause(query)
+    if not select_clause or None in select_clause:
+        return "Error: Could not determine what to SELECT. Please check your query."
+    if not from_clause:
+        return "Error: Could not determine which table to SELECT FROM. Please check your query."
+    sql = f"SELECT {', '.join(select_clause)} FROM {from_clause}"
+    if where_clause:
+        conditions = extract_conditions(where_clause)
+        if conditions:
+            sql += f" WHERE {conditions}"
+    return sql
+
 def on_generate_sql(): # triggers the parsing and SQL generation when user submits their input
     user_input = query_input.get()
     if not user_input:
@@ -160,6 +205,21 @@ def on_generate_sql(): # triggers the parsing and SQL generation when user submi
     output_text.delete(1.0, tk.END)
     output_text.insert(tk.END, sql_query)
     output_text.config(state=tk.DISABLED)
+
+     # Store query in history
+    if user_input not in query_history:
+        query_history.append(user_input)
+        update_query_history()
+
+def update_query_history():
+    query_history_combobox['values'] = query_history
+    if query_history:
+        query_history_combobox.current(len(query_history) - 1)
+
+def on_query_history_select(event):
+    selected_query = query_history_combobox.get()
+    query_input.delete(0, tk.END)
+    query_input.insert(0, selected_query)
 
 window = tk.Tk()
 window.title("Natural Language to SQL Translator")
@@ -187,15 +247,26 @@ query_label.pack(anchor="w", pady=5)
 
 query_input = ttk.Entry(query_frame, width=80)
 query_input.pack(fill="x", pady=5)
+ToolTip(query_input, "Type a natural language query, e.g., 'Show me all users with more than 100 followers.'")
 
 generate_button = ttk.Button(query_frame, text="Generate SQL", command=on_generate_sql)
 generate_button.pack(pady=10)
+ToolTip(generate_button, "Click to translate the query into SQL.")
+
+# Query History Dropdown
+query_history_label = ttk.Label(query_frame, text="Query History:")
+query_history_label.pack(anchor="w", pady=5)
+
+query_history_combobox = ttk.Combobox(query_frame, width=80)
+query_history_combobox.bind("<<ComboboxSelected>>", on_query_history_select)
+query_history_combobox.pack(fill="x", pady=5)
 
 output_frame = ttk.LabelFrame(main_frame, text="Generated SQL Query", padding=10)
 output_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
 
 output_text = tk.Text(output_frame, height=10, wrap="word", state=tk.DISABLED)
 output_text.pack(fill="both", expand=True)
+ToolTip(output_text, "The SQL query generated from your input will appear here.")
 
 main_frame.rowconfigure(0, weight=1)
 main_frame.rowconfigure(2, weight=2)
