@@ -134,7 +134,7 @@ def extract_conditions(where_clause): # parses the WHERE clause into individual 
             combined_conditions.append(logical_operators[i])
     return " ".join(combined_conditions)
 
-def parse_query(query):
+def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses to generate the final SQL query
     query = query.lower()
     from_clause = extract_from_clause(query)
     select_clause = extract_select_clause(query, from_clause)
@@ -150,7 +150,7 @@ def parse_query(query):
             sql += f" WHERE {conditions}"
     return sql
 
-def on_generate_sql():
+def on_generate_sql(): # triggers the parsing and SQL generation when user submits their input
     user_input = query_input.get()
     if not user_input:
         messagebox.showwarning("Input Error", "Please enter a query.")
