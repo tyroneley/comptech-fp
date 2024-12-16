@@ -24,7 +24,7 @@ def populate_schema(tree):
         for column in columns:
             tree.insert(parent, "end", text=column)
 
-def normalize_column(col_name):
+def normalize_column(col_name): # handles the recognition of column names by normalizing variations or synonyms
     synonyms = {
         "name": ["name", "username", "user name", "the name"],
         "email": ["email", "email address", "the email"],
@@ -39,13 +39,13 @@ def normalize_column(col_name):
             return standard_name
     return None
 
-def preprocess_where_clause(where_clause):
+def preprocess_where_clause(where_clause): # removing unnecessary words like "the", "is", "are"
     unnecessary_words = ["the", "is", "are"]
     for word in unnecessary_words:
         where_clause = re.sub(rf"\b{word}\b", "", where_clause, flags=re.IGNORECASE)
     return where_clause.strip()
 
-def extract_select_clause(query, table_in_context):
+def extract_select_clause(query, table_in_context): # identifies the columns that the user wants to SELECT in their query
     aggregates = {
         "total number": "COUNT",
         "average": "AVG",
@@ -70,7 +70,7 @@ def extract_select_clause(query, table_in_context):
         return ["*"]
     return None
 
-def extract_from_clause(query):
+def extract_from_clause(query): # determines which table the user is referring to in their query
     normalized_query = query
     for standard_name, variations in synonyms.items():
         for variation in variations:
@@ -89,7 +89,7 @@ def extract_from_clause(query):
             return tables_mentioned[0]
     return None
 
-def extract_where_clause(query):
+def extract_where_clause(query): # identifies the WHERE clause in the query
     match = re.search(r"(where|who|having) (.+)", query, re.IGNORECASE)
     if match:
         return match.group(2).strip()
@@ -98,7 +98,7 @@ def extract_where_clause(query):
         return fallback_match.group(1).strip()
     return None
 
-def extract_conditions(where_clause):
+def extract_conditions(where_clause): # parses the WHERE clause into individual conditions 
     cleaned_clause = preprocess_where_clause(where_clause)
     condition_parts = re.split(r"\b(and|or)\b", cleaned_clause, flags=re.IGNORECASE)
     conditions = []
