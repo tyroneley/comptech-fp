@@ -9,13 +9,13 @@ tables = {
 }
 
 synonyms = {
-    "followers": ["followers", "follower count", "number of followers", "followers count"],
-    "name": ["name", "username", "user name", "full name"],
+    "name": ["name", "username", "user name", "the name"],
+    "email": ["email", "email address", "the email"],
+    "content": ["content", "post content", "message", "text", "the content"],
     "created_at": ["created_at", "created on", "joined", "date joined"],
-    "content": ["content", "post content", "message", "text"],
+    "followers": ["followers", "follower count", "number of followers", "the followers"],
     "user_id": ["user_id", "author id", "poster id"],
     "id": ["id", "post id", "user id", "comment id"],
-    "email": ["email", "email address"]
 }
 
 query_history = []
@@ -54,15 +54,6 @@ class ToolTip:
             self.tip_window = None
 
 def normalize_column(col_name): # handles the recognition of column names by normalizing variations or synonyms
-    synonyms = {
-        "name": ["name", "username", "user name", "the name"],
-        "email": ["email", "email address", "the email"],
-        "content": ["content", "post content", "message", "text", "the content"],
-        "created_at": ["created_at", "created on", "joined", "date joined"],
-        "followers": ["followers", "follower count", "number of followers", "the followers"],
-        "user_id": ["user_id", "author id", "poster id"],
-        "id": ["id", "post id", "user id", "comment id"],
-    }
     for standard_name, variations in synonyms.items():
         if col_name.lower() in variations:
             return standard_name
@@ -118,22 +109,27 @@ def extract_from_clause(query): # determines which table the user is referring t
             return tables_mentioned[0]
     return None
 
-def extract_where_clause(query): # identifies the WHERE clause in the query
-    match = re.search(r"(where|who|having) (.+)", query, re.IGNORECASE)
+def extract_where_clause(query):
+    match = re.search(r"(where|who|having|with) (.+)", query, re.IGNORECASE)
     if match:
+        print("DEBUG: Extracted WHERE Clause:", match.group(2).strip())  # Debugging
         return match.group(2).strip()
     fallback_match = re.search(r"users who (.+)", query, re.IGNORECASE)
     if fallback_match:
+        print("DEBUG: Fallback WHERE Clause:", fallback_match.group(1).strip())  # Debugging
         return fallback_match.group(1).strip()
     return None
 
-def extract_conditions(where_clause): # parses the WHERE clause into individual conditions 
+
+def extract_conditions(where_clause):
     cleaned_clause = preprocess_where_clause(where_clause)
+    print("DEBUG: Cleaned WHERE Clause:", cleaned_clause)  # Debugging
     condition_parts = re.split(r"\b(and|or)\b", cleaned_clause, flags=re.IGNORECASE)
     conditions = []
     logical_operators = []
     for part in condition_parts:
         part = part.strip()
+        print("DEBUG: Condition Part:", part)  # Debugging
         if part.lower() in ["and", "or"]:
             logical_operators.append(part.upper())
         else:
@@ -150,24 +146,35 @@ def extract_conditions(where_clause): # parses the WHERE clause into individual 
                  lambda col, val1, val2: f"{normalize_column(col.strip())} BETWEEN {val1} AND {val2}")
             ]
             for pattern, repl in condition_patterns:
-                matches = re.findall(pattern, part)
-                for match in matches:
-                    col = match[0].strip()
+                match = re.search(pattern, part, re.IGNORECASE)
+                if match:
+                    print("DEBUG: Matched Pattern:", match.groups())  # Debugging
+                    col = match.group(1).strip()
                     col = normalize_column(col)
                     if col:
-                        conditions.append(repl(col, *match[1:]))
+                        condition = repl(col, *match.groups()[1:])
+                        print("DEBUG: Generated Condition:", condition)  # Debugging
+                        conditions.append(condition)
+                        break
     combined_conditions = []
     for i, condition in enumerate(conditions):
         combined_conditions.append(condition)
         if i < len(logical_operators):
             combined_conditions.append(logical_operators[i])
-    return " ".join(combined_conditions)
+    result = " ".join(combined_conditions) if conditions else None
+    print("DEBUG: Combined Conditions:", result)  # Debugging
+    return result
 
-def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses to generate the final SQL query
+
+def parse_query(query):
+    print("DEBUG: Input Query:", query)  # Debugging
     query = query.lower()
     from_clause = extract_from_clause(query)
+    print("DEBUG: Extracted FROM Clause:", from_clause)  # Debugging
     select_clause = extract_select_clause(query, from_clause)
+    print("DEBUG: Extracted SELECT Clause:", select_clause)  # Debugging
     where_clause = extract_where_clause(query)
+    print("DEBUG: Extracted WHERE Clause:", where_clause)  # Debugging
     if not select_clause or None in select_clause:
         return "Error: Could not determine what to SELECT. Please check your query."
     if not from_clause:
@@ -175,9 +182,12 @@ def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses
     sql = f"SELECT {', '.join(select_clause)} FROM {from_clause}"
     if where_clause:
         conditions = extract_conditions(where_clause)
+        print("DEBUG: Final Conditions:", conditions)  # Debugging
         if conditions:
             sql += f" WHERE {conditions}"
+    print("DEBUG: Final SQL Query:", sql)  # Debugging
     return sql
+
 
 def parse_query(query): # combines the extracted SELECT, FROM, and WHERE clauses to generate the final SQL query
     query = query.lower()
@@ -247,7 +257,7 @@ query_label.pack(anchor="w", pady=5)
 
 query_input = ttk.Entry(query_frame, width=80)
 query_input.pack(fill="x", pady=5)
-ToolTip(query_input, "Type a natural language query, e.g., 'Show me all users with more than 100 followers.'")
+ToolTip(query_input, "Type a natural language query, e.g., 'Show me all users with followers more than 100.'")
 
 generate_button = ttk.Button(query_frame, text="Generate SQL", command=on_generate_sql)
 generate_button.pack(pady=10)
